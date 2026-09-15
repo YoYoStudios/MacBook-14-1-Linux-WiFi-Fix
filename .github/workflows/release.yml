@@ -18,54 +18,92 @@ permissions:
   contents: write
 
 jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Clone source
+        shell: bash
+        run: |
+          git clone --no-tags "https://github.com/${GITHUB_REPOSITORY}.git" repo
+          cd repo
+          git checkout --detach "$GITHUB_SHA"
+      - name: Read version and create draft release
+        id: version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '[:space:]' < repo/VERSION)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $VERSION already exists; assets will be replaced."
+          else
+            gh release create "$VERSION" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "$VERSION - Cross-platform GUI" \
+              --generate-notes \
+              --draft
+          fi
+
   distro-smoke:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v7
-      - name: Syntax-check Linux scripts on distro containers
+      - name: Clone source
+        shell: bash
+        run: |
+          git clone --no-tags "https://github.com/${GITHUB_REPOSITORY}.git" repo
+          cd repo
+          git checkout --detach "$GITHUB_SHA"
+      - name: Syntax-check scripts on distro containers
         shell: bash
         run: |
           set -e
           files="install.sh uninstall.sh src/macbookpro14-1-wifi-fix src/macbookpro14-1-wifi-fix.openrc distros/arch.sh distros/fedora.sh distros/ubuntu.sh distros/debian.sh"
           for image in ubuntu:24.04 debian:bookworm fedora:latest archlinux:latest; do
             echo "== $image =="
-            docker run --rm -v "$PWD:/repo:ro" "$image" bash -lc "for f in $files; do bash -n /repo/\$f; done"
+            docker run --rm -v "$PWD/repo:/repo:ro" "$image" bash -lc "for f in $files; do bash -n /repo/\$f; done"
           done
 
   build:
+    needs: prepare-release
     strategy:
       fail-fast: false
       matrix:
         include:
           - runner: ubuntu-latest
-            artifact: linux-x64
             asset: MacBook-WiFi-Fix-Linux-x86_64
             kind: linux
+            python: python3
           - runner: ubuntu-24.04-arm
-            artifact: linux-arm64
             asset: MacBook-WiFi-Fix-Linux-arm64
             kind: linux
+            python: python3
           - runner: windows-latest
-            artifact: windows-x64
             asset: MacBook-WiFi-Fix-Windows-x64.exe
             kind: windows
+            python: python
           - runner: macos-15-intel
-            artifact: macos-intel
             asset: MacBook-WiFi-Fix-macOS-Intel.zip
             kind: mac
+            python: python3
           - runner: macos-15
-            artifact: macos-arm64
             asset: MacBook-WiFi-Fix-macOS-AppleSilicon.zip
             kind: mac
+            python: python3
     runs-on: ${{ matrix.runner }}
 
     steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
+      - name: Clone source
+        shell: bash
+        run: |
+          git clone --no-tags "https://github.com/${GITHUB_REPOSITORY}.git" repo
+          cd repo
+          git checkout --detach "$GITHUB_SHA"
 
       - name: Install Linux GUI libraries
         if: matrix.kind == 'linux'
@@ -74,94 +112,90 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y python3-tk tk-dev
 
-      - name: Install build tools
-        run: python -m pip install --upgrade pip "pyinstaller>=6.15,<7"
+      - name: Ensure macOS Tk support
+        if: matrix.kind == 'mac'
+        shell: bash
+        run: |
+          if ! ${{ matrix.python }} -c 'import tkinter' >/dev/null 2>&1; then
+            brew install python-tk@3.13
+          fi
 
-      - name: Compile check
-        run: python -m py_compile app.py
+      - name: Install PyInstaller and compile-check
+        shell: bash
+        working-directory: repo
+        run: |
+          ${{ matrix.python }} -m pip install --user --upgrade pip "pyinstaller>=6.16,<7"
+          ${{ matrix.python }} -m py_compile app.py
 
       - name: Build GUI
-        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name MacBook-WiFi-Fix app.py
+        shell: bash
+        working-directory: repo
+        run: ${{ matrix.python }} -m PyInstaller --noconfirm --clean --onefile --windowed --name MacBook-WiFi-Fix app.py
 
       - name: Prepare Linux asset
         if: matrix.kind == 'linux'
         shell: bash
         run: |
-          cp dist/MacBook-WiFi-Fix "${{ matrix.asset }}"
+          cp repo/dist/MacBook-WiFi-Fix "${{ matrix.asset }}"
           chmod +x "${{ matrix.asset }}"
 
       - name: Prepare Windows asset
         if: matrix.kind == 'windows'
         shell: pwsh
-        run: Copy-Item "dist\MacBook-WiFi-Fix.exe" "${{ matrix.asset }}"
+        run: Copy-Item "repo\dist\MacBook-WiFi-Fix.exe" "${{ matrix.asset }}"
 
       - name: Prepare macOS asset
         if: matrix.kind == 'mac'
         shell: bash
-        run: |
-          ditto -c -k --sequesterRsrc --keepParent "dist/MacBook-WiFi-Fix.app" "${{ matrix.asset }}"
+        run: ditto -c -k --sequesterRsrc --keepParent "repo/dist/MacBook-WiFi-Fix.app" "${{ matrix.asset }}"
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-${{ matrix.artifact }}
-          path: ${{ matrix.asset }}
-          if-no-files-found: error
+      - name: Upload release asset
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+        run: gh release upload "$VERSION" "${{ matrix.asset }}" --clobber --repo "$GITHUB_REPOSITORY"
 
   portable:
+    needs: prepare-release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - name: Clone source
+        shell: bash
+        run: |
+          git clone --no-tags "https://github.com/${GITHUB_REPOSITORY}.git" repo
+          cd repo
+          git checkout --detach "$GITHUB_SHA"
       - name: Build portable bundle
         shell: bash
         run: |
           set -e
           root="MacBook-WiFi-Fix-Portable"
           mkdir -p "$root/src" "$root/windows" "$root/distros" "$root/bootloaders"
-          cp install.sh uninstall.sh "$root/"
-          cp src/macbookpro14-1-wifi-fix src/macbookpro14-1-wifi-fix.service src/macbookpro14-1-wifi-fix.openrc "$root/src/"
-          cp windows/*.ps1 "$root/windows/"
-          cp distros/*.sh "$root/distros/"
-          cp bootloaders/*.sh "$root/bootloaders/"
-          cp README.md "$root/"
+          cp repo/install.sh repo/uninstall.sh "$root/"
+          cp repo/src/macbookpro14-1-wifi-fix repo/src/macbookpro14-1-wifi-fix.service repo/src/macbookpro14-1-wifi-fix.openrc "$root/src/"
+          cp repo/windows/*.ps1 "$root/windows/"
+          cp repo/distros/*.sh "$root/distros/"
+          cp repo/bootloaders/*.sh "$root/bootloaders/"
+          cp repo/README.md "$root/"
           zip -r MacBook-WiFi-Fix-Portable.zip "$root"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-portable
-          path: MacBook-WiFi-Fix-Portable.zip
+      - name: Upload portable bundle
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+        run: gh release upload "$VERSION" MacBook-WiFi-Fix-Portable.zip --clobber --repo "$GITHUB_REPOSITORY"
 
-  release:
+  publish:
     needs:
+      - prepare-release
       - build
       - portable
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: release-*
-          path: release-assets
-          merge-multiple: true
-
-      - name: Create or update GitHub Release
+      - name: Publish release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          VERSION="$(tr -d '[:space:]' < VERSION)"
-          mapfile -t FILES < <(find release-assets -maxdepth 1 -type f -print | sort)
-
-          if [[ ${#FILES[@]} -eq 0 ]]; then
-            echo "No release assets found."
-            exit 1
-          fi
-
-          if gh release view "$VERSION" >/dev/null 2>&1; then
-            gh release upload "$VERSION" "${FILES[@]}" --clobber
-          else
-            gh release create "$VERSION" \
-              --target "$GITHUB_SHA" \
-              --title "$VERSION - Cross-platform GUI" \
-              --generate-notes \
-              "${FILES[@]}"
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+        run: gh release edit "$VERSION" --draft=false --repo "$GITHUB_REPOSITORY"
