@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Syntax-check Linux scripts on distro containers
         shell: bash
         run: |
@@ -61,9 +61,9 @@ jobs:
     runs-on: ${{ matrix.runner }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -101,7 +101,7 @@ jobs:
         run: |
           ditto -c -k --sequesterRsrc --keepParent "dist/MacBook-WiFi-Fix.app" "${{ matrix.asset }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.artifact }}
           path: ${{ matrix.asset }}
@@ -110,7 +110,7 @@ jobs:
   portable:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build portable bundle
         shell: bash
         run: |
@@ -124,7 +124,7 @@ jobs:
           cp bootloaders/*.sh "$root/bootloaders/"
           cp README.md "$root/"
           zip -r MacBook-WiFi-Fix-Portable.zip "$root"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-portable
           path: MacBook-WiFi-Fix-Portable.zip
@@ -135,9 +135,9 @@ jobs:
       - portable
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: release-*
           path: release-assets
