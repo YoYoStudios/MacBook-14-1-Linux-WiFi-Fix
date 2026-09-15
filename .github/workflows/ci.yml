@@ -23,6 +23,7 @@ jobs:
         run: |
           bash -n install.sh
           bash -n uninstall.sh
-          bash -n src/macbookpro14-1-wifi-fix
-          bash -n src/macbookpro14-1-wifi-fix.openrc
+          bash -n src/macbook-wifi-fix
+          bash -n src/macbook-wifi-fix.openrc
+          bash -n src/install-firmware-packages
           for f in distros/*.sh bootloaders/*.sh; do bash -n "$f"; done

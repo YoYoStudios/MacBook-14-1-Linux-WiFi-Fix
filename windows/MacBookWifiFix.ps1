@@ -2,8 +2,8 @@ param([switch]$Quiet)
 
 $ErrorActionPreference = "Stop"
 $model = (Get-CimInstance Win32_ComputerSystemProduct).Name
-if ($model -ne "MacBookPro14,1") {
-    if (-not $Quiet) { Write-Host "Not MacBookPro14,1 ($model); skipping." }
+if ($model -notmatch '^MacBook') {
+    if (-not $Quiet) { Write-Host "Not an Apple MacBook ($model); skipping." }
     exit 0
 }
 

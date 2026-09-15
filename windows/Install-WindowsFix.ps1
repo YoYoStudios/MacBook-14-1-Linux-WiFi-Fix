@@ -1,17 +1,20 @@
 param([switch]$Uninstall)
 
 $ErrorActionPreference = "Stop"
-$task = "MacBookPro14_1-WiFi-Fix"
+$task = "MacBook-WiFi-Fix"
+$legacyTask = "MacBookPro14_1-WiFi-Fix"
 $dir = Join-Path $env:ProgramData "MacBookWiFiFix"
 $script = Join-Path $dir "MacBookWifiFix.ps1"
 
 if ($Uninstall) {
     Unregister-ScheduledTask -TaskName $task -Confirm:$false -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName $legacyTask -Confirm:$false -ErrorAction SilentlyContinue
     Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
     Write-Host "Windows startup workaround removed."
     exit 0
 }
 
+Unregister-ScheduledTask -TaskName $legacyTask -Confirm:$false -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
 Copy-Item -Force "$PSScriptRoot\MacBookWifiFix.ps1" $script
 

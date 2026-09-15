@@ -1,0 +1,234 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MODE="apply"
+case "${1:-}" in
+    --boot) MODE="boot" ;;
+    --check) MODE="check" ;;
+    --diagnose) MODE="diagnose" ;;
+    "") ;;
+    *)
+        echo "Usage: $0 [--boot|--check|--diagnose]"
+        exit 2
+        ;;
+esac
+
+MODEL="$(cat /sys/class/dmi/id/product_name 2>/dev/null || true)"
+VENDOR="$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null || true)"
+ARCH="$(uname -m)"
+DISTRO="unknown"
+if [[ -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    DISTRO="${PRETTY_NAME:-${ID:-unknown}}"
+fi
+
+log() {
+    [[ "$MODE" == "boot" ]] && echo "macbook-wifi-fix: $*" || echo "$*"
+}
+
+is_apple() {
+    [[ "$VENDOR" == Apple* || "$MODEL" == MacBook* ]]
+}
+
+is_t2_model() {
+    case "$MODEL" in
+        MacBookPro15,*|MacBookPro16,*|MacBookAir8,*|MacBookAir9,1) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+is_sta_common_id() {
+    case "${1,,}" in
+        43a0|43b1) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+is_known_brcmfmac_id() {
+    # Intel PCI IDs documented by Linux Wireless / current brcmfmac support.
+    # The running kernel modalias check below is preferred; this is a fallback.
+    case "${1,,}" in
+        43a3|43df|43ec|43d3|43d9|43e9|43ef|43ba|43bb|43bc|aa52|43ca|43cb|43cc|43c3|43c4|43c5|440d|43dc|4464|4488) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+wireless_broadcom_devices() {
+    local dev vendor class
+    for dev in /sys/bus/pci/devices/*; do
+        [[ -r "$dev/vendor" && -r "$dev/class" ]] || continue
+        vendor="$(cat "$dev/vendor")"
+        class="$(cat "$dev/class")"
+        [[ "$vendor" == "0x14e4" && "$class" == 0x0280* ]] || continue
+        printf '%s\n' "$dev"
+    done
+}
+
+current_driver() {
+    local dev="$1"
+    if [[ -L "$dev/driver" ]]; then
+        basename "$(readlink -f "$dev/driver")"
+    else
+        printf '%s\n' "none"
+    fi
+}
+
+available_modules() {
+    local dev="$1" alias
+    [[ -r "$dev/modalias" ]] || return 0
+    alias="$(cat "$dev/modalias")"
+    modprobe -R "$alias" 2>/dev/null || true
+}
+
+has_netdev() {
+    local dev="$1"
+    compgen -G "$dev/net/*" >/dev/null 2>&1
+}
+
+kernel_log() {
+    dmesg --color=never 2>/dev/null || dmesg 2>/dev/null || true
+}
+
+mmio_failure_seen() {
+    local bdf="$1"
+    kernel_log | grep -Ei "($bdf.*(MMIO read failed|brcmf_chip_recognition|brcmf_pcie_probe)|brcmf.*(MMIO read failed|brcmf_chip_recognition))" >/dev/null 2>&1
+}
+
+firmware_failure_seen() {
+    local bdf="$1"
+    kernel_log | grep -Ei "($bdf.*(Direct firmware load.*failed|firmware.*(not found|failed)|Firmware has halted)|brcmf.*Direct firmware load.*failed)" >/dev/null 2>&1
+}
+
+brcmfmac_capable() {
+    local dev="$1" id="$2" driver modules
+    driver="$(current_driver "$dev")"
+    [[ "$driver" == "brcmfmac" ]] && return 0
+    modules="$(available_modules "$dev")"
+    grep -qx "brcmfmac" <<<"$modules" && return 0
+    is_known_brcmfmac_id "$id"
+}
+
+print_device() {
+    local dev="$1" bdf id driver modules ifaces
+    bdf="$(basename "$dev")"
+    id="$(cat "$dev/device" 2>/dev/null || echo unknown)"
+    id="${id#0x}"
+    driver="$(current_driver "$dev")"
+    modules="$(available_modules "$dev" | paste -sd, -)"
+    ifaces="$(find "$dev/net" -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null | paste -sd, -)"
+    printf '  %s 14e4:%s driver=%s modules=%s interfaces=%s\n' \
+        "$bdf" "$id" "$driver" "${modules:-none}" "${ifaces:-none}"
+}
+
+if ! is_apple; then
+    log "Not an Apple MacBook (vendor=${VENDOR:-unknown}, model=${MODEL:-unknown}); no action."
+    exit 1
+fi
+
+if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
+    log "Apple Silicon / ARM64 detected. Intel PCI recovery is disabled on this platform."
+    log "Use the Asahi Linux / Fedora Asahi Remix platform Wi-Fi stack."
+    exit 0
+fi
+
+mapfile -t DEVICES < <(wireless_broadcom_devices)
+
+if [[ "$MODE" == "diagnose" ]]; then
+    echo "MacBook Linux Wi-Fi Fix diagnostics"
+    echo "Model:        ${MODEL:-unknown}"
+    echo "Vendor:       ${VENDOR:-unknown}"
+    echo "Architecture: $ARCH"
+    echo "Distro:       $DISTRO"
+    if is_t2_model; then
+        echo "T2 family:    yes"
+    else
+        echo "T2 family:    no/unknown"
+    fi
+    echo "Broadcom PCI Wi-Fi:"
+    if ((${#DEVICES[@]} == 0)); then
+        echo "  none detected"
+    else
+        for dev in "${DEVICES[@]}"; do
+            print_device "$dev"
+        done
+    fi
+    echo
+    echo "Relevant kernel messages:"
+    kernel_log | grep -Ei 'brcm|b43|wl:|firmware|wifi|wlan' | tail -n 80 || true
+    exit 0
+fi
+
+if ((${#DEVICES[@]} == 0)); then
+    log "No Broadcom PCI wireless controller detected. Nothing for this Broadcom recovery path to do."
+    exit 0
+fi
+
+if [[ "$MODE" == "check" ]]; then
+    log "Detected ${MODEL:-unknown}:"
+    for dev in "${DEVICES[@]}"; do
+        print_device "$dev"
+    done
+    if is_t2_model; then
+        log "T2-family Mac detected: Apple firmware + a T2-capable kernel may still be required."
+    fi
+    exit 0
+fi
+
+if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+    exec sudo "$0" "${1:-}"
+fi
+
+changed=0
+for dev in "${DEVICES[@]}"; do
+    [[ -d "$dev" ]] || continue
+
+    bdf="$(basename "$dev")"
+    id="$(cat "$dev/device" 2>/dev/null || echo 0x0000)"
+    id="${id#0x}"
+    driver="$(current_driver "$dev")"
+
+    if is_sta_common_id "$id"; then
+        log "$bdf (14e4:$id) is a common Broadcom STA/wl device; PCI brcmfmac reset skipped."
+        continue
+    fi
+
+    if [[ "$driver" != "none" && "$driver" != "brcmfmac" ]]; then
+        log "$bdf is already bound to $driver, not brcmfmac; leaving it alone."
+        continue
+    fi
+
+    if ! brcmfmac_capable "$dev" "$id"; then
+        log "$bdf (14e4:$id) is not identified as a brcmfmac PCI device; leaving it alone."
+        continue
+    fi
+
+    if has_netdev "$dev"; then
+        log "$bdf already has a network interface; no PCI recovery needed."
+        continue
+    fi
+
+    if firmware_failure_seen "$bdf" && ! mmio_failure_seen "$bdf"; then
+        log "$bdf looks like a missing/failed firmware case; PCI reset skipped."
+        if is_t2_model; then
+            log "T2 Mac detected: follow t2linux firmware/kernel setup."
+        fi
+        continue
+    fi
+
+    log "Recovering Broadcom Wi-Fi at $bdf (14e4:$id) by PCI remove/rescan..."
+    echo 1 > "$dev/remove"
+    sleep 2
+    echo 1 > /sys/bus/pci/rescan
+    modprobe brcmfmac 2>/dev/null || true
+    command -v udevadm >/dev/null 2>&1 && udevadm settle --timeout=5 2>/dev/null || true
+    sleep 2
+    changed=1
+
+done
+
+if ((changed)); then
+    log "PCI recovery completed."
+else
+    log "No safe automatic PCI recovery was needed."
+fi

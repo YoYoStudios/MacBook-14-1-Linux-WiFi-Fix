@@ -1,0 +1,13 @@
+#!/sbin/openrc-run
+description="MacBook Linux Wi-Fi recovery"
+
+depend() {
+    need localmount
+    before net
+}
+
+start() {
+    ebegin "Checking MacBook Broadcom Wi-Fi"
+    /usr/local/sbin/macbook-wifi-fix --boot
+    eend $?
+}

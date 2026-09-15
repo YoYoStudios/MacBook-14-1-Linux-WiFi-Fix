@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-echo "Installing MacBookPro14,1 Wi-Fi fix for Arch / EndeavourOS..."
-exec bash "$ROOT/install.sh"
+echo "Preparing Broadcom firmware for Arch/EndeavourOS..."
+MWF_DISTRO=arch bash "$ROOT/src/install-firmware-packages" || true
+exec bash "$ROOT/install.sh" "$@"

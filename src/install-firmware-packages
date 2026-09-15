@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+    exec sudo --preserve-env=MWF_DISTRO bash "$0" "$@"
+fi
+
+MODEL="$(cat /sys/class/dmi/id/product_name 2>/dev/null || true)"
+ARCH="$(uname -m)"
+
+if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
+    echo "Apple Silicon detected; distro firmware helper skipped. Use Asahi platform packages."
+    exit 0
+fi
+
+is_t2_model() {
+    case "$MODEL" in
+        MacBookPro15,*|MacBookPro16,*|MacBookAir8,*|MacBookAir9,1) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+sta_needed=0
+for dev in /sys/bus/pci/devices/*; do
+    [[ -r "$dev/vendor" && -r "$dev/device" && -r "$dev/class" ]] || continue
+    [[ "$(cat "$dev/vendor")" == "0x14e4" ]] || continue
+    [[ "$(cat "$dev/class")" == 0x0280* ]] || continue
+    id="$(cat "$dev/device")"
+    id="${id#0x}"
+    case "${id,,}" in
+        43a0|43b1) sta_needed=1 ;;
+    esac
+done
+
+# T2 Macs must use brcmfmac + Apple firmware, never the old Broadcom STA driver.
+if is_t2_model; then
+    sta_needed=0
+fi
+
+DISTRO="${MWF_DISTRO:-}"
+if [[ -z "$DISTRO" && -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    case " ${ID:-} ${ID_LIKE:-} " in
+        *arch*) DISTRO="arch" ;;
+        *fedora*) DISTRO="fedora" ;;
+        *ubuntu*) DISTRO="ubuntu" ;;
+        *debian*) DISTRO="debian" ;;
+    esac
+fi
+
+case "$DISTRO" in
+    arch)
+        if command -v pacman >/dev/null 2>&1; then
+            pacman -S --needed --noconfirm linux-firmware-broadcom || echo "Could not install linux-firmware-broadcom (offline/stale mirrors?). Continuing."
+            if ((sta_needed)); then
+                pacman -S --needed --noconfirm broadcom-wl-dkms || echo "Could not install broadcom-wl-dkms. Continuing."
+            fi
+        fi
+        ;;
+    fedora)
+        if command -v dnf >/dev/null 2>&1; then
+            dnf -y install brcmfmac-firmware || echo "Could not install brcmfmac-firmware. Continuing."
+            if ((sta_needed)); then
+                if dnf -q repoquery akmod-wl >/dev/null 2>&1; then
+                    dnf -y install broadcom-wl akmod-wl || echo "Could not install RPM Fusion Broadcom STA packages. Continuing."
+                else
+                    echo "Broadcom STA hardware detected, but RPM Fusion's akmod-wl is not available in configured repos."
+                fi
+            fi
+        fi
+        ;;
+    ubuntu)
+        if command -v apt-get >/dev/null 2>&1; then
+            apt-get install -y linux-firmware || echo "Could not install linux-firmware. Continuing."
+            if ((sta_needed)); then
+                apt-get install -y bcmwl-kernel-source || apt-get install -y broadcom-sta-dkms || echo "Could not install Broadcom STA driver. Continuing."
+            fi
+        fi
+        ;;
+    debian)
+        if command -v apt-get >/dev/null 2>&1; then
+            apt-get install -y firmware-brcm80211 || echo "Could not install firmware-brcm80211; make sure non-free-firmware is enabled. Continuing."
+            if ((sta_needed)); then
+                apt-get install -y broadcom-sta-dkms || echo "Could not install broadcom-sta-dkms; make sure non-free is enabled. Continuing."
+            fi
+        fi
+        ;;
+    *)
+        echo "Unknown distro; skipping package-manager changes."
+        ;;
+esac
+
+if is_t2_model; then
+    echo "T2 Mac detected. Generic firmware packages may not contain the Apple-specific files this machine needs."
+    echo "Use the t2linux Wi-Fi guide / get-apple-firmware tooling for the Apple firmware."
+fi

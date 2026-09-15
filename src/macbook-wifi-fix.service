@@ -1,0 +1,14 @@
+[Unit]
+Description=MacBook Linux Wi-Fi recovery
+After=systemd-udev-trigger.service
+Before=NetworkManager.service iwd.service wpa_supplicant.service systemd-networkd.service
+ConditionVirtualization=!container
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/sleep 2
+ExecStart=/usr/local/sbin/macbook-wifi-fix --boot
+TimeoutStartSec=20
+
+[Install]
+WantedBy=multi-user.target

@@ -11,6 +11,8 @@ on:
       - install.sh
       - uninstall.sh
       - src/**
+      - distros/**
+      - bootloaders/**
       - windows/**
       - .github/workflows/release.yml
 
@@ -44,7 +46,7 @@ jobs:
             gh release create "$VERSION" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
-              --title "$VERSION - Cross-platform GUI" \
+              --title "$VERSION - Universal MacBook Wi-Fi Fix" \
               --generate-notes \
               --draft
           fi
@@ -63,7 +65,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          files="install.sh uninstall.sh src/macbookpro14-1-wifi-fix src/macbookpro14-1-wifi-fix.openrc distros/arch.sh distros/fedora.sh distros/ubuntu.sh distros/debian.sh"
+          files="install.sh uninstall.sh src/macbook-wifi-fix src/macbook-wifi-fix.openrc src/install-firmware-packages distros/arch.sh distros/fedora.sh distros/ubuntu.sh distros/debian.sh"
           for image in ubuntu:24.04 debian:bookworm fedora:latest archlinux:latest; do
             echo "== $image =="
             docker run --rm -v "$PWD/repo:/repo:ro" "$image" bash -lc "for f in $files; do bash -n /repo/\$f; done"
@@ -173,8 +175,8 @@ jobs:
           root="MacBook-WiFi-Fix-Portable"
           mkdir -p "$root/src" "$root/windows" "$root/distros" "$root/bootloaders"
           cp repo/install.sh repo/uninstall.sh "$root/"
-          cp repo/src/macbookpro14-1-wifi-fix repo/src/macbookpro14-1-wifi-fix.service repo/src/macbookpro14-1-wifi-fix.openrc "$root/src/"
-          cp repo/windows/*.ps1 "$root/windows/"
+          cp repo/src/macbook-wifi-fix repo/src/macbook-wifi-fix.service repo/src/macbook-wifi-fix.openrc repo/src/install-firmware-packages "$root/src/"
+          cp repo/windows/*.ps1 repo/windows/README.md "$root/windows/"
           cp repo/distros/*.sh "$root/distros/"
           cp repo/bootloaders/*.sh "$root/bootloaders/"
           cp repo/README.md "$root/"

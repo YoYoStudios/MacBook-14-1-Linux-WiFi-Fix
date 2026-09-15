@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-echo "Installing MacBookPro14,1 Wi-Fi fix for Fedora..."
-exec bash "$ROOT/install.sh"
+echo "Preparing Broadcom firmware for Fedora..."
+MWF_DISTRO=fedora bash "$ROOT/src/install-firmware-packages" || true
+exec bash "$ROOT/install.sh" "$@"
