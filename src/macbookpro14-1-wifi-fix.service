@@ -1,0 +1,13 @@
+[Unit]
+Description=MacBookPro14,1 Broadcom Wi-Fi PCI reset workaround
+After=systemd-udev-trigger.service
+Before=NetworkManager.service systemd-networkd.service iwd.service
+ConditionPathExists=/sys/class/dmi/id/product_name
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/macbookpro14-1-wifi-fix
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
