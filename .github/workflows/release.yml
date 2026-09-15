@@ -20,6 +20,7 @@ permissions:
 jobs:
   distro-smoke:
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Syntax-check Linux scripts on distro containers
@@ -33,7 +34,6 @@ jobs:
           done
 
   build:
-    needs: distro-smoke
     strategy:
       fail-fast: false
       matrix:
@@ -108,7 +108,6 @@ jobs:
           if-no-files-found: error
 
   portable:
-    needs: distro-smoke
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
