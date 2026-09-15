@@ -12,18 +12,22 @@ jobs:
   source-checks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
+      - name: Clone source
+        shell: bash
+        run: |
+          git clone --no-tags "https://github.com/${GITHUB_REPOSITORY}.git" repo
+          cd repo
+          git checkout --detach "$GITHUB_SHA"
       - name: Python syntax
-        run: python -m py_compile app.py
+        shell: bash
+        run: python3 -m py_compile repo/app.py
       - name: Shell syntax
         shell: bash
         run: |
-          bash -n install.sh
-          bash -n uninstall.sh
-          bash -n src/macbook-wifi-fix
-          bash -n src/macbook-wifi-fix.openrc
-          bash -n src/install-firmware-packages
-          for f in distros/*.sh bootloaders/*.sh; do bash -n "$f"; done
+          set -e
+          bash -n repo/install.sh
+          bash -n repo/uninstall.sh
+          bash -n repo/src/macbook-wifi-fix
+          bash -n repo/src/macbook-wifi-fix.openrc
+          bash -n repo/src/install-firmware-packages
+          for f in repo/distros/*.sh repo/bootloaders/*.sh; do bash -n "$f"; done
