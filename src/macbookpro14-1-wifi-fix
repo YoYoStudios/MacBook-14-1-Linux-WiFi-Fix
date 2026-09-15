@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MODEL="$(cat /sys/class/dmi/id/product_name 2>/dev/null || true)"
+if [[ "$MODEL" != "MacBookPro14,1" ]]; then
+    echo "Not a MacBookPro14,1; skipping."
+    exit 0
+fi
+
+find_target() {
+    local dev vendor class
+    for dev in /sys/bus/pci/devices/*; do
+        [[ -r "$dev/vendor" && -r "$dev/class" ]] || continue
+        vendor="$(cat "$dev/vendor")"
+        class="$(cat "$dev/class")"
+        if [[ "$vendor" == "0x14e4" && "$class" == 0x0280* ]]; then
+            printf '%s\n' "$dev"
+            return 0
+        fi
+    done
+    return 1
+}
+
+TARGET="$(find_target || true)"
+if [[ -z "$TARGET" ]]; then
+    echo 1 > /sys/bus/pci/rescan
+    sleep 2
+    TARGET="$(find_target || true)"
+fi
+
+if [[ -z "$TARGET" ]]; then
+    echo "Broadcom wireless PCI device not found; nothing to do."
+    exit 0
+fi
+
+BDF="$(basename "$TARGET")"
+echo "Resetting Broadcom Wi-Fi device at $BDF"
+
+# Detach the PCI function, then force the bus to enumerate it again.
+echo 1 > "$TARGET/remove"
+sleep 2
+echo 1 > /sys/bus/pci/rescan
+sleep 2
+
+# The kernel normally probes brcmfmac automatically after the rescan,
+# but loading it explicitly is harmless and helps on some distributions.
+modprobe brcmfmac 2>/dev/null || true
+
+echo "Wi-Fi PCI reset complete."
