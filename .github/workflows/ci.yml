@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - VERSION
+
+jobs:
+  source-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python syntax
+        run: python -m py_compile app.py
+      - name: Shell syntax
+        shell: bash
+        run: |
+          bash -n install.sh
+          bash -n uninstall.sh
+          bash -n src/macbookpro14-1-wifi-fix
+          bash -n src/macbookpro14-1-wifi-fix.openrc
+          for f in distros/*.sh bootloaders/*.sh; do bash -n "$f"; done

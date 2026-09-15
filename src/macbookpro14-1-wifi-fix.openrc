@@ -1,0 +1,13 @@
+#!/sbin/openrc-run
+description="MacBookPro14,1 Broadcom Wi-Fi PCI reset"
+
+depend() {
+    need localmount
+    before net
+}
+
+start() {
+    ebegin "Resetting MacBookPro14,1 Broadcom Wi-Fi"
+    /usr/local/sbin/macbookpro14-1-wifi-fix
+    eend $?
+}

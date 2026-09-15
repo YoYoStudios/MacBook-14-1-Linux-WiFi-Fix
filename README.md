@@ -1,42 +1,58 @@
-# MacBookPro14,1 Linux Wi-Fi PCI Reset Fix
+# MacBookPro14,1 Linux Wi-Fi Fix
 
-A small boot-time workaround for the 2017 **MacBookPro14,1** where the internal Broadcom Wi-Fi works in Linux live USBs but fails after installing Linux.
+A workaround for the 2017 **MacBookPro14,1** Broadcom Wi-Fi bug where wireless works in Linux live media but an installed Linux system can boot with `brcmfmac` unable to talk to the PCI device.
 
-The failure can show up in `dmesg` as `brcmfmac` PCI/MMIO errors such as:
+The working reset is:
 
-```text
-brcmfmac: ... MMIO read failed: 0xffffffff
+```bash
+echo 1 | sudo tee /sys/bus/pci/devices/0000:02:00.0/remove
+echo 1 | sudo tee /sys/bus/pci/rescan
 ```
 
-The workaround is the same thing that fixes it manually: remove the Broadcom Wi-Fi PCI device from sysfs, rescan the PCI bus, and let `brcmfmac` probe it again.
+This project makes that automatic without hardcoding `02:00.0`.
 
-## Supported distros
+## GUI release
 
-- Arch Linux / EndeavourOS
-- Fedora
-- Ubuntu / Linux Mint
-- Debian
-- Most other systemd-based distros
+The release app can:
 
-## Supported boot methods
+- apply the Linux PCI reset immediately;
+- install/uninstall the boot workaround on the current Linux system;
+- install the workaround into a mounted Linux root/drive for distro hopping;
+- create a portable USB/folder bundle from Linux, Windows, or macOS;
+- optionally install a Windows startup adapter-restart workaround if Windows itself ever has the same problem.
 
-- GRUB
-- systemd-boot
-- rEFInd
-- EFISTUB
+The GUI is built by GitHub Actions for:
 
-The bootloader itself does **not** need to be modified. The workaround runs as a systemd oneshot during boot, so it stays the same when you distro-hop or change bootloaders.
+- Linux x86_64
+- Linux ARM64
+- Windows x64
+- macOS Intel
+- macOS Apple Silicon
 
-## Install
+The **Intel macOS build** is the one for MacBookPro14,1.
 
-Clone the repo:
+> Native macOS and normal Boot Camp Windows usually do not need the Linux PCI workaround. Their builds are mainly useful for preparing a portable/offline fix. The Windows local workaround is opt-in.
+
+## Linux support
+
+The boot installer supports:
+
+- systemd
+- OpenRC
+
+Tested in CI for shell compatibility against Ubuntu, Debian, Fedora, and Arch containers.
+
+The bootloader does not matter. GRUB, systemd-boot, rEFInd, and EFISTUB all work because the reset runs after the kernel boots.
+
+## Install from source
 
 ```bash
 git clone https://github.com/YoYoStudios/MacBook-14-1-Linux-WiFi-Fix.git
 cd MacBook-14-1-Linux-WiFi-Fix
+sudo bash install.sh
 ```
 
-Then run the script for your distro:
+The existing distro wrappers also work:
 
 ```bash
 sudo bash distros/arch.sh
@@ -45,59 +61,49 @@ sudo bash distros/ubuntu.sh
 sudo bash distros/debian.sh
 ```
 
-Ubuntu's script also covers Linux Mint and other Ubuntu-based distros.
+## Portable/offline install
 
-Or just use the universal installer:
+Run the GUI and choose **Create Portable Fix on USB / Folder**, or place the repository on a USB drive and run:
 
 ```bash
 sudo bash install.sh
 ```
 
-## Bootloader wrappers
+The GUI can also choose **Install Fix to Mounted Linux Drive / Root** to write the helper/service directly to another Linux installation.
 
-These all install the same systemd workaround; they do not rewrite your bootloader configuration.
+## Windows
 
-```bash
-sudo bash bootloaders/grub.sh
-sudo bash bootloaders/systemd-boot.sh
-sudo bash bootloaders/refind.sh
-sudo bash bootloaders/efistub.sh
+If Windows itself has a Broadcom startup problem, run PowerShell as Administrator:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\windows\Install-WindowsFix.ps1
 ```
 
-## What it does
+Remove it with:
 
-The installed helper:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\windows\Install-WindowsFix.ps1 -Uninstall
+```
 
-1. Refuses to run on anything other than `MacBookPro14,1`.
-2. Finds the internal Broadcom PCI wireless controller automatically instead of hardcoding `02:00.0`.
-3. Removes that PCI device from sysfs.
-4. Rescans the PCI bus.
-5. Loads `brcmfmac` again if needed.
+This creates a startup task that restarts the Broadcom PCI network device and rescans hardware. It is not required when Windows Wi-Fi already works.
 
-The service runs automatically on every boot.
+## Logs
 
-## Status / logs
+systemd:
 
 ```bash
 systemctl status macbookpro14-1-wifi-fix.service
 journalctl -u macbookpro14-1-wifi-fix.service -b
 ```
 
-## Manual workaround
-
-If the card is at `02:00.0`, the original manual fix is:
-
-```bash
-echo 1 | sudo tee /sys/bus/pci/devices/0000:02:00.0/remove
-echo 1 | sudo tee /sys/bus/pci/rescan
-```
-
-## Uninstall
-
-```bash
-sudo bash uninstall.sh
-```
-
 ## Safety
 
-This project intentionally limits itself to `MacBookPro14,1` and a Broadcom PCI wireless-class device. If either check fails, it exits without removing a PCI device.
+Local Linux/Windows actions check that the machine identifies as `MacBookPro14,1`.
+
+Linux device discovery only targets a Broadcom (`14e4`) PCI wireless-class device and prefers the BCM4350 device used by this MacBook. Offline-drive installation only writes the helper and init service to the root you select.
+
+## Releases
+
+`VERSION` controls the release version. Updating it triggers the cross-platform GitHub Actions build and creates/updates the GitHub Release automatically.
+
+The GUI binaries are currently unsigned, so Windows SmartScreen or macOS Gatekeeper may warn on first launch.
